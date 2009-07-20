@@ -12,6 +12,7 @@ public class ChunkedNetflixRatingIterator implements RatingIterator {
   int index;
   Rating rs[];
   File inputFile;
+  
   public ChunkedNetflixRatingIterator(File in) {
     inputFile = in;
     cacheRatings = new SoftReference<Rating[]>(null);

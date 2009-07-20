@@ -1,15 +1,18 @@
 package reco;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Random;
 
-public class PMF implements Recommender{
+public class ChunkedPMF implements Recommender{
   int userNum;
   int itemNum;
   int factorNum;
   double learningRate;
+  double momentum = 1.0;
   double userReg;
   double itemReg;
-  RatingIterator iter;
+  List<RatingIterator> iters;
   double userMatrix[][];
   double um_next[][];
   double um_grad[][];
@@ -17,15 +20,14 @@ public class PMF implements Recommender{
   double im_next[][];
   double im_grad[][];
   Random rand;
-  double cur_like;
-  public PMF(int userNum , int itemNum , RatingIterator iter , int factorNum , double learningRate , double ureg , double ireg ){
+  public ChunkedPMF(int userNum , int itemNum , List<RatingIterator> iters , int factorNum , double learningRate , double ureg , double ireg ){
     this.userNum = userNum;
     this.itemNum = itemNum;
     this.factorNum = factorNum;
     this.learningRate = learningRate;
     this.userReg = ureg;
     this.itemReg = ireg;
-    this.iter = iter;
+    this.iters = iters;
     userMatrix = new double[userNum][factorNum];
     itemMatrix = new double[itemNum][factorNum];
     rand = new Random(this.hashCode());
@@ -35,24 +37,25 @@ public class PMF implements Recommender{
     im_next = new double[itemNum][factorNum];
     um_grad = new double[userNum][factorNum];
     im_grad = new double[itemNum][factorNum];
-    cur_like = likelihood(userMatrix, itemMatrix);
   }
   
-  public PMF(int userNum , int itemNum , RatingIterator iter){
-    this(userNum , itemNum , iter , 10 , 1.0e-3 , 1.0e-3 , 1.0e-4);
+  public ChunkedPMF(int userNum , int itemNum , List<RatingIterator> iters){
+    this(userNum , itemNum , iters , 10 , 1.0e-3 , 1.0e-3 , 1.0e-4);
   }
   
   void initMatrix(double matrix[][]){
     for(int i = 0 ; i < matrix.length ; i++){
       for(int j = 0 ; j < matrix[i].length ; j++){
-        matrix[i][j]  = rand.nextDouble();
+        matrix[i][j]  = Math.random();
       }
     }
   }
   
   @Override
   public double predictRate(int user , int item){
-    return product(userMatrix[user] , itemMatrix[item]);
+    double p = product(userMatrix[user] , itemMatrix[item]);
+//    return p;
+    return p * (K - 1) + 1.0;
   }
   
   double product(double users[] , double items[]){
@@ -60,7 +63,8 @@ public class PMF implements Recommender{
     for(int f = 0 ; f < factorNum ; f++){
       ret += users[f] * items[f];
     }
-    return ret;
+//    return ret;
+    return 1.0 / (1.0 + Math.exp(- ret));
   }
   
   double norm(double matrix[][]){
@@ -72,13 +76,17 @@ public class PMF implements Recommender{
     }
     return norm;
   }
-  
-  public double likelihood(double users[][] , double items[][]){
+  final static double K = 5.0;
+  double t(double x){
+//    return x;
+    return (x - 1.0) / (K - 1);
+  }
+  public double likelihood(double users[][] , double items[][] , RatingIterator iter){
     double ret = 0.0;
     iter.reset();
     while(iter.hasNext()){
       Rating r = iter.next();
-      double rdiff = r.rate - product(users[r.user], items[r.movie]);
+      double rdiff = t(r.rate) - product(users[r.user], items[r.movie]);
       ret += rdiff * rdiff;
     }
     double reg = userReg * norm(users) + itemReg * norm(items);
@@ -91,32 +99,44 @@ public class PMF implements Recommender{
   }
   
   public boolean update(){
-    zeroFill(im_grad); zeroFill(um_grad);
     int cnt = 0;
-    iter.reset();
-    while(iter.hasNext()){
-      cnt++;
-      Rating r = iter.next();
-      double rdiff = r.rate - product(userMatrix[r.user], itemMatrix[r.movie]);
-      for(int f = 0 ; f < factorNum ; f++){
-        um_grad[r.user][f] += - rdiff *  itemMatrix[r.movie][f] + userReg * userMatrix[r.user][f];
-        im_grad[r.movie][f] += - rdiff * userMatrix[r.user][f] + itemReg * itemMatrix[r.movie][f];
+    Collections.shuffle(iters , rand);
+    boolean converge = true;
+    for(RatingIterator iter : iters){
+      zeroFill(im_grad); zeroFill(um_grad);
+      iter.reset();
+      while(iter.hasNext()){
+        Rating r = iter.next();
+        double product = product(userMatrix[r.user], itemMatrix[r.movie]);
+        double rdiff = t(r.rate) - product;
+        for(int f = 0 ; f < factorNum ; f++){
+          um_grad[r.user][f] += - rdiff *  itemMatrix[r.movie][f] + userReg * userMatrix[r.user][f] * (1 - product) * product;
+          im_grad[r.movie][f] += - rdiff * userMatrix[r.user][f] + itemReg * itemMatrix[r.movie][f] * (1 - product) * product;
+        }
       }
-    }
-    while(this.learningRate > 1e-10){
-      test_update(um_grad, im_grad);
-      double next_like = likelihood(um_next, im_next);
-      System.out.println(cur_like+" "+next_like+" "+learningRate);      
-      if(next_like > cur_like){
+//      double cur_like = likelihood(userMatrix, itemMatrix , iter);
+      double lr = this.learningRate;
+      for(int test = 0 ; test < 1 ; test++){
+        test_update(um_grad, im_grad , lr);
         next();
-        this.learningRate *= 1.25;
-        this.cur_like = next_like;
+        converge = false;
         return true;
-      }else{
-        this.learningRate *= 0.5;
+//        double next_like = likelihood(um_next, im_next , iter);
+//        System.out.println(cur_like +" "+next_like+" "+lr+" "+cnt);
+//        if(next_like > cur_like){
+//          next();
+//          converge = false;
+//          break;
+////          return true;
+//        }else{
+//          lr *= .5;
+//        }
       }
+      System.out.println(cnt);
+      cnt++;
     }
-    return false;
+//    Collections.reverse(iters);
+    return !converge;
   }
   void next(){
     for(int i = 0 ; i < userNum ; i++){
@@ -127,15 +147,15 @@ public class PMF implements Recommender{
     }
   }
               
-  void test_update(double u_grad[][] , double i_grad[][]){
+  void test_update(double u_grad[][] , double i_grad[][] , double lr){
     for(int i = 0 ; i < userNum ; i++){
       for(int f = 0 ; f < factorNum ; f++){
-        um_next[i][f] = userMatrix[i][f] - learningRate * u_grad[i][f];
+        um_next[i][f] = userMatrix[i][f] - lr * u_grad[i][f];
       }
     }
     for(int i = 0 ; i < itemNum ; i++){
       for(int f = 0 ; f < factorNum ; f++){
-        im_next[i][f] = itemMatrix[i][f] - learningRate * i_grad[i][f];
+        im_next[i][f] = itemMatrix[i][f] - lr * i_grad[i][f];
       }
     }
   }

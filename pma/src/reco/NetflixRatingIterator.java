@@ -53,6 +53,7 @@ public class NetflixRatingIterator implements RatingIterator {
       return null;
     }
   }
+  
   long parse(char[] line){
     long l1 = 0;
     int i = 0;
@@ -66,6 +67,7 @@ public class NetflixRatingIterator implements RatingIterator {
     }
     return (l1 << 32l) |  l2;
   }
+  
   @Override
   public Rating next() {
     if(mstart){
