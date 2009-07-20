@@ -16,6 +16,7 @@ public class ChunkedNetflixRatingIterator implements RatingIterator {
     inputFile = in;
     cacheRatings = new SoftReference<Rating[]>(null);
   }
+  
   private void load(){
     try{
       BufferedReader br = new BufferedReader(new FileReader(inputFile));
